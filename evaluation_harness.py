@@ -58,6 +58,10 @@ class EvaluationResult:
     assoc_weight_std: float       # final std assoc_to_assoc weight
     mean_reaction_time_ms: float  # time-to-first-assoc-spike in test phase
 
+    # Working-memory diagnostics (MVE success criteria)
+    delay_maintenance: float      # mean corr(sample, delay2): does the sample pattern persist?
+    distractor_rejection: float   # mean corr(sample, delay2) - corr(distractor, delay2)
+
     per_trial: List[TrialResult] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, float]:
@@ -79,6 +83,8 @@ class EvaluationResult:
             "assoc_weight_mean": self.assoc_weight_mean,
             "assoc_weight_std": self.assoc_weight_std,
             "mean_reaction_time_ms": self.mean_reaction_time_ms,
+            "delay_maintenance": self.delay_maintenance,
+            "distractor_rejection": self.distractor_rejection,
         }
 
 
@@ -165,6 +171,8 @@ class EvaluationHarness:
         assoc_sample_rates = []
         assoc_test_rates = []
         reaction_times = []
+        delay_maintenance = []
+        distractor_rejection = []
         n_features_encoded = 0
         n_features_total = 0
 
@@ -199,6 +207,13 @@ class EvaluationHarness:
 
             assoc_sample_rates.append(result.phase_stats["sample"].firing_rate)
             assoc_test_rates.append(result.phase_stats["test"].firing_rate)
+
+            # Working memory: does the sample pattern persist through the delay
+            # (delay2), and does it win out over the distractor?
+            dm = self.runner._pearson(result.sample_pattern, result.delay2_pattern)
+            dr = dm - self.runner._pearson(result.distractor_pattern, result.delay2_pattern)
+            delay_maintenance.append(dm)
+            distractor_rejection.append(dr)
 
             rt = self._reaction_time_ms()
             if rt is not None:
@@ -235,6 +250,8 @@ class EvaluationHarness:
             assoc_weight_mean=float(assoc_weight_mean),
             assoc_weight_std=assoc_weight_std,
             mean_reaction_time_ms=float(np.mean(reaction_times)) if reaction_times else 0.0,
+            delay_maintenance=float(np.mean(delay_maintenance)) if delay_maintenance else 0.0,
+            distractor_rejection=float(np.mean(distractor_rejection)) if distractor_rejection else 0.0,
             per_trial=results,
         )
 

@@ -94,6 +94,9 @@ class TrialResult:
     sensory_test_rates: np.ndarray  # per-feature sensory rate during test
     sample_pattern: np.ndarray  # associative per-neuron rate during sample
     test_pattern: np.ndarray  # associative per-neuron rate during test
+    delay1_pattern: np.ndarray  # associative per-neuron rate during delay1
+    delay2_pattern: np.ndarray  # associative per-neuron rate during delay2
+    distractor_pattern: np.ndarray  # associative per-neuron rate during distractor
 
 
 class TrialRunner:
@@ -362,6 +365,21 @@ class TrialRunner:
             t_start + self.offsets["test"],
             self.durations["test"],
         )
+        delay1_pattern = self._population_pattern(
+            self.associative_population,
+            t_start + self.offsets["delay1"],
+            self.durations["delay1"],
+        )
+        delay2_pattern = self._population_pattern(
+            self.associative_population,
+            t_start + self.offsets["delay2"],
+            self.durations["delay2"],
+        )
+        distractor_pattern = self._population_pattern(
+            self.associative_population,
+            t_start + self.offsets["distractor"],
+            self.durations["distractor"],
+        )
         similarity = self._pearson(sample_pattern, test_pattern)
         decision = similarity >= self.readout_threshold
         correct = decision == stimuli.test_is_match
@@ -392,6 +410,9 @@ class TrialRunner:
             sensory_test_rates=self._sensory_rates("test"),
             sample_pattern=sample_pattern,
             test_pattern=test_pattern,
+            delay1_pattern=delay1_pattern,
+            delay2_pattern=delay2_pattern,
+            distractor_pattern=distractor_pattern,
         )
 
         self.elapsed_ms += self.trial_duration
