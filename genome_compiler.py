@@ -523,6 +523,42 @@ apost += 1
 w = clip(w + a_plus * apre, w_min, w_max)
 '''
 
+# Three-factor (neuromodulator-gated) STDP: identical pair-based STDP, but the
+# plasticity update is scaled by ``(1 + D)`` where ``D`` is a neuromodulator
+# scalar (e.g. the dopamine level). ``D == 0`` recovers plain STDP. Ported from
+# the earlier ``legacy_vibe_web/compiler.py``.
+THREE_FACTOR_MODEL = STDP_MODEL + '''
+D : 1 (shared)
+'''
+
+THREE_FACTOR_ON_PRE = '''
+v_post += w * mV
+apre += 1
+w = clip(w - a_minus * apost * (1.0 + D), w_min, w_max)
+'''
+
+THREE_FACTOR_ON_POST = '''
+apost += 1
+w = clip(w + a_plus * apre * (1.0 + D), w_min, w_max)
+'''
+
+THREE_FACTOR_SLOW_ON_PRE = '''
+v_post += w * mV
+g_nmda_post += w * mV
+apre += 1
+w = clip(w - a_minus * apost * (1.0 + D), w_min, w_max)
+'''
+
+
+def _neuromodulator_level(genome: 'DevelopmentalGenome') -> float:
+    """Return the dopamine baseline (or 0.0) as the three-factor gate ``D``."""
+    for nm in genome.neuromodulators:
+        if nm.name == "dopamine":
+            return nm.baseline
+    if genome.neuromodulators:
+        return genome.neuromodulators[0].baseline
+    return 0.0
+
 
 def compile_stdp_synapses(
     source: b2.NeuronGroup,
@@ -530,16 +566,25 @@ def compile_stdp_synapses(
     spec: SynapseTypeSpec,
     connectivity: np.ndarray,
     name: str,
+    neuromodulator_level: float = 0.0,
 ) -> b2.Synapses:
     """
-    Compile pair-based STDP synapses.
+    Compile pair-based STDP synapses (optionally three-factor / neuromodulated).
 
     Uses event-driven presynaptic (``apre``) and postsynaptic (``apost``)
     traces. On a postsynaptic spike the weight is potentiated by
     ``a_plus * apre`` (pre-before-post); on a presynaptic spike it is depressed
     by ``a_minus * apost`` (post-before-pre). Weights are clipped to
     ``[w_min, w_max]``.
+
+    If ``spec.synapse_type`` is ``THREE_FACTOR``, the plasticity update is
+    gated by ``(1 + D)`` where ``D = neuromodulator_level`` (the dopamine
+    level), so a reward signal scales how strongly STDP acts.
     """
+    from genome_schema import SynapseType
+
+    three_factor = spec.synapse_type == SynapseType.THREE_FACTOR
+
     # Get pre and post indices from connectivity matrix
     pre_idx, post_idx = np.where(connectivity)
 
@@ -558,22 +603,29 @@ def compile_stdp_synapses(
     # remembered pattern across the delay. A purely-slow recurrent synapse
     # cannot be balanced by fast inhibition and collapses to silence or runs
     # away. See [[Neuromorphic_Homeostasis_Implementation]].
-    if getattr(spec, 'slow_channel', False):
-        on_pre = '''
+    if three_factor:
+        model = THREE_FACTOR_MODEL
+        on_post = THREE_FACTOR_ON_POST
+        on_pre = THREE_FACTOR_SLOW_ON_PRE if getattr(spec, 'slow_channel', False) else THREE_FACTOR_ON_PRE
+    else:
+        model = STDP_MODEL
+        on_post = STDP_ON_POST
+        if getattr(spec, 'slow_channel', False):
+            on_pre = '''
 v_post += w * mV
 g_nmda_post += w * mV
 apre += 1
 w = clip(w - a_minus * apost, w_min, w_max)
 '''
-    else:
-        on_pre = STDP_ON_PRE
+        else:
+            on_pre = STDP_ON_PRE
 
     S = b2.Synapses(
         source,
         target,
-        STDP_MODEL,
+        model,
         on_pre=on_pre,
-        on_post=STDP_ON_POST,
+        on_post=on_post,
         delay=spec.delay * b2.ms,
         name=name,
     )
@@ -587,6 +639,8 @@ w = clip(w - a_minus * apost, w_min, w_max)
     S.a_minus = a_minus
     S.w_min = w_min
     S.w_max = w_max
+    if three_factor:
+        S.D = neuromodulator_level
 
     return S
 
@@ -597,6 +651,7 @@ def compile_synapses(
     synapse_spec: SynapseTypeSpec,
     connectivity: np.ndarray,
     name: str,
+    neuromodulator_level: float = 0.0,
 ) -> b2.Synapses:
     """
     Compile synapses based on the synapse type specification.
@@ -608,7 +663,7 @@ def compile_synapses(
     if synapse_spec.synapse_type in [SynapseType.STATIC, SynapseType.HEBBIAN]:
         return compile_static_synapses(source, target, synapse_spec, connectivity, name)
     elif synapse_spec.synapse_type in [SynapseType.STD, SynapseType.THREE_FACTOR]:
-        return compile_stdp_synapses(source, target, synapse_spec, connectivity, name)
+        return compile_stdp_synapses(source, target, synapse_spec, connectivity, name, neuromodulator_level)
     else:
         print(f"Warning: Synapse type {synapse_spec.synapse_type} not yet implemented. Falling back to static.")
         return compile_static_synapses(source, target, synapse_spec, connectivity, name)
@@ -813,6 +868,7 @@ class GenomeCompiler:
         
         # Step 2: Create connectivity
         print("Compiling connectivity...")
+        neuromodulator_level = _neuromodulator_level(genome)
         for conn_spec in genome.connectivity_rules:
             source_group = neuron_groups[conn_spec.source]
             target_group = neuron_groups[conn_spec.target]
@@ -841,6 +897,7 @@ class GenomeCompiler:
                 synapse_spec=synapse_type,
                 connectivity=connectivity,
                 name=conn_spec.name,
+                neuromodulator_level=neuromodulator_level,
             )
             compiled.add_synapse_group(conn_spec.name, synapses)
         
