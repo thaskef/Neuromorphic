@@ -367,6 +367,11 @@ class TrialRunner:
         correct = decision == stimuli.test_is_match
         reward = 1.0 if correct else -1.0
 
+        # Deliver the reward to the neuromodulator system: releases dopamine on
+        # a correct trial and suppresses it on an error, gating the THREE_FACTOR
+        # synapses' plasticity for the next trial.
+        self.network.apply_reward(reward, self.trial_duration)
+
         # --- phase stats ---------------------------------------------------
         phase_stats: Dict[str, PhaseStats] = {}
         for phase, dur in self.durations.items():

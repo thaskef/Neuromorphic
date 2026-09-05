@@ -66,6 +66,12 @@ class CompiledNetwork:
         
         # Observable values
         self.observable_cache: Dict[str, Any] = {}
+        
+        # Neuromodulator state (three-factor gating). ``neuromodulators`` holds
+        # the genome's NeuromodulatorSpec list; ``neuromodulator_level`` is the
+        # running dopamine gate D applied to THREE_FACTOR synapses.
+        self.neuromodulators: List[Any] = []
+        self.neuromodulator_level: float = 0.0
     
     def add_neuron_group(self, name: str, group: b2.NeuronGroup):
         """Register a neuron group."""
@@ -118,6 +124,47 @@ class CompiledNetwork:
                 group.g_nmda = 0 * b2.mV
             if 'g_adapt' in group.variables:
                 group.g_adapt = 0 * b2.mV
+    
+    def set_neuromodulator_level(self, level: float) -> None:
+        """Set the neuromodulator gate ``D`` on every three-factor synapse.
+
+        ``D`` scales the STDP weight update by ``(1 + D)``, so a positive level
+        (reward) reinforces plasticity and a negative level (punishment)
+        suppresses it.
+        """
+        self.neuromodulator_level = float(level)
+        for sg in self.synapse_groups.values():
+            if 'D' in sg.variables:
+                sg.D = self.neuromodulator_level
+    
+    def apply_reward(self, reward: float, elapsed_ms: float = 0.0) -> float:
+        """Update the neuromodulator level in response to a trial outcome.
+
+        For each neuromodulator, releases on reward (``trigger_on_reward``) or
+        suppresses on error (``trigger_on_error``), then decays the level toward
+        its baseline over ``elapsed_ms`` (the trial duration). Returns the new
+        level so the harness can log it.
+        """
+        for nm in self.neuromodulators:
+            baseline = getattr(nm, 'baseline', 0.0)
+            release = getattr(nm, 'release_amount', 1.0)
+            tau_decay = getattr(nm, 'tau_decay', None)
+            trigger_reward = getattr(nm, 'trigger_on_reward', False)
+            trigger_error = getattr(nm, 'trigger_on_error', False)
+
+            # Decay toward baseline over the elapsed trial time.
+            if tau_decay and elapsed_ms > 0.0:
+                decay = float(np.exp(-elapsed_ms / tau_decay))
+                self.neuromodulator_level = baseline + (self.neuromodulator_level - baseline) * decay
+
+            # Release (reward) or suppress (error).
+            if reward > 0.0 and trigger_reward:
+                self.neuromodulator_level += release
+            elif reward < 0.0 and trigger_error:
+                self.neuromodulator_level -= release
+
+        self.set_neuromodulator_level(self.neuromodulator_level)
+        return self.neuromodulator_level
     
     def get_firing_rate(self, population: str, window: float = 100.0) -> float:
         """Get mean firing rate for a population over the last window ms."""
@@ -920,6 +967,11 @@ class GenomeCompiler:
         compiled.build_network()
         
         print(f"Compilation complete: {sum(compiled.population_sizes.values())} neurons, {sum(compiled.connection_counts.values())} connections")
+        
+        # Store neuromodulator config and the initial gate level so the harness
+        # can drive reward-gated (three-factor) plasticity at runtime.
+        compiled.neuromodulators = list(genome.neuromodulators)
+        compiled.neuromodulator_level = neuromodulator_level
         
         return compiled
 
