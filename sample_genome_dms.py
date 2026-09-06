@@ -20,6 +20,8 @@ from genome_schema import (
     DevelopmentalGenome,
     HomeostaticMechanism,
     HomeostaticRule,
+    NeuromodulatorSpec,
+    NeuromodulatorType,
     NeuronModel,
     NeuronTypeSpec,
     ObservableSpec,
@@ -132,10 +134,16 @@ def create_dms_genome(
             description="Static synapse from sensory to associative (selective)"
         ),
         
-        # Associative to associative - plastic with STDP
+        # Associative to associative - plastic, reward-gated (three-factor) STDP.
+        #
+        # Three-factor STDP gates the pair-based weight update by (1 + D), where
+        # D is the dopamine level released on reward. A correct trial releases
+        # dopamine (reinforcing the recurrent traces that held the sample) and
+        # an incorrect trial suppresses it, so the attractor is shaped by the
+        # outcome rather than eroded by unsupervised STDP.
         SynapseTypeSpec(
             name="assoc_to_assoc",
-            synapse_type=SynapseType.STD,
+            synapse_type=SynapseType.THREE_FACTOR,
             weight=0.5,
             delay=1.5,
             tau_plus=20.0,
@@ -144,8 +152,9 @@ def create_dms_genome(
             a_minus=0.1,
             w_min=0.01,
             w_max=2.0,
+            neuromodulator="dopamine",  # gated by the reward signal
             slow_channel=True,  # recurrent excitation sustains delay activity
-            description="STDP synapse for associative network plasticity"
+            description="Reward-gated (three-factor) STDP for associative plasticity"
         ),
         
         # Associative to inhibitory - plastic
@@ -483,6 +492,26 @@ def create_dms_genome(
     )
     
     # =========================================================================
+    # NEUROMODULATORS
+    # =========================================================================
+    
+    # Dopamine gates the recurrent (three-factor) STDP. It is released on a
+    # correct trial and decays back to baseline, so the network reinforces the
+    # recurrent traces that produce correct behavior instead of letting
+    # unsupervised STDP erode them.
+    neuromodulators = [
+        NeuromodulatorSpec(
+            name="dopamine",
+            neuromodulator_type=NeuromodulatorType.DOPAMINE,
+            baseline=0.0,
+            release_amount=1.0,
+            tau_decay=100.0,
+            trigger_on_reward=True,
+            description="Reward signal gating recurrent plasticity",
+        ),
+    ]
+    
+    # =========================================================================
     # CREATE GENOME
     # =========================================================================
     
@@ -496,6 +525,7 @@ def create_dms_genome(
         connectivity_rules=connectivity_rules,
         plasticity_rules=plasticity_rules,
         homeostatic_rules=homeostatic_rules,
+        neuromodulators=neuromodulators,
         observables=observables,
     )
     

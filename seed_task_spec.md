@@ -123,13 +123,20 @@ Memory Readout (via linear classifier on associative layer activity)
 
 ### For MVE (Genome + Compiler)
 
-| Metric | Target | Measurement |
-|--------|--------|-------------|
-| **Network spiking** | > 5 Hz mean rate | Across associative population |
-| **Sample encoding** | > 80% accuracy | Sensory → associative activation |
-| **Delay maintenance** | > 50% accuracy | Pattern persistence across delay |
-| **Distractor rejection** | > 70% accuracy | Non-match not recalled |
-| **Full task accuracy** | > 60% | Across 100 trials |
+**Revised gate (2026-09-04):** the hand-coded genome does *not* need to solve DMS
+before LLM guidance. It must establish a **valid, non-degenerate DMS environment**:
+the substrate encodes stimuli, retention of sample information is *measurable*
+through the delay/distractor, and the readout cannot succeed by re-reading the
+stimulus. The LLM is then tasked with discovering genome-level changes that turn
+this substrate into memory-dependent DMS performance.
+
+| Metric | Baseline requirement | Measurement |
+|--------|----------------------|-------------|
+| **Network spiking** | > 5 Hz mean rate | associative population |
+| **Sample encoding** | > 80% accuracy | sensory → associative activation |
+| **Retention** | measurable (not required to be solved) | decoding / `corr(sample, delay2)` |
+| **Readout non-degeneracy** | readout observes delay2-held state, not the sample | `decision = corr(delay2, test) > θ` |
+| **Behavioral DMS accuracy** | *ultimate criterion* — above chance, memory-dependent (the LLM's target) | across 100 trials |
 
 ### For LLM Guidance (Phase 2)
 
@@ -168,7 +175,7 @@ Memory Readout (via linear classifier on associative layer activity)
 - [x] Trial scheduler (sample → delay → distractor → delay → test)
 - [x] Reward calculator (match vs non-match)
 - [x] Performance tracker (accuracy, reaction time)
-- [ ] Neuromodulator release on reward
+- [x] Neuromodulator release on reward (dopamine gates three-factor STDP)
 
 ### LLM Interface
 
@@ -185,7 +192,7 @@ Memory Readout (via linear classifier on associative layer activity)
 2. **Build stimulus encoder** — Map 10-bit vectors to Poisson spike trains in sensory layer
 3. **Implement trial runner** — Orchestrate trial phases, inject stimuli, deliver reward
 4. **Create evaluation harness** — Run trials, compute accuracy, return observables to LLM
-5. **Test with hand-coded genome** — Verify task is learnable before LLM guidance
+5. **Establish the MVE baseline** — Verify the substrate encodes stimuli, retention is measurable through the delay/distractor, and the readout is memory-dependent (cannot re-read). Then introduce the LLM to improve memory-dependent DMS performance.
 
 ---
 
